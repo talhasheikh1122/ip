@@ -119,7 +119,7 @@ if [ $rotating_interval -lt 0 ] || [ $rotating_interval -gt 59 ]; then
   usage
 fi
 
-if [ $start_port -lt 80 ] || (($start_port -gt 65536)); then
+if [ $start_port -lt 80 ] || [ $start_port -gt 65536 ]; then
   echo_log_err "Error: invalid value of '--start-port' parameter (must be from 80 to 65536)"
   usage
 fi
