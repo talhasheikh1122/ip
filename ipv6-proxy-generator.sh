@@ -154,7 +154,7 @@ function check_ipv6(){
 }
 
 # Install required libraries
-function install_requred_packages(){
+function install_required_packages(){
   apt update &>> "$script_log_file"
 
   requred_packages=("make" "g++" "wget" "curl" "cron")
