@@ -1,19 +1,20 @@
 #!/bin/bash
 # Script must be running from root
-if [ "$EUID" -ne 0 ];
-  then echo "Please run as root";
-  exit 1;
+if [ "$EUID" -ne 0 ]; then 
+  echo "Please run as root"; 
+  exit 1; 
 fi;
 
 # Program help info for users
-function usage() { echo "Usage: $0  [-s | --subnet <16|32|48|64|80|96|112> proxy subnet (default 64)] 
+function usage() { 
+  echo "Usage: $0  [-s | --subnet <16|32|48|64|80|96|112> proxy subnet (default 64)] 
                                     [-c | --proxy-count <number> count of proxies] 
                                     [-u | --username <string> proxy auth username] 
                                     [-p | --password <string> proxy password]
                                     [--random <bool> generate random username/password for each IPv4 backconnect proxy instead of predefined (default false)] 
                                     [-t | --proxies-type <http|socks5> result proxies type (default http)]
                                     [-r | --rotating-interval <0-59> proxies extarnal address rotating time in minutes (default 0, disabled)]
-                                    [--start-port <5000-65536> start port for backconnect ipv4 (default 30000)]
+                                    [--start-port <3128-65536> start port for backconnect ipv4 (default 3128)]
                                     [-l | --localhost <bool> allow connections only for localhost (backconnect on 127.0.0.1)]
                                     [-m | --ipv6-mask <string> constant ipv6 address mask, to which the rotated part is added (or gateaway)
                                           use only if the gateway is different from the subnet address]
@@ -36,7 +37,7 @@ eval set -- "$options"
 # Set default values for optional arguments
 subnet=64
 proxies_type="http"
-start_port=30000
+start_port=3128
 rotating_interval=0
 use_localhost=false
 auth=true
@@ -82,15 +83,15 @@ function echo_log_err_and_exit(){
 # Check validity of user provided arguments
 re='^[0-9]+$'
 if ! [[ $proxy_count =~ $re ]] ; then
-	echo_log_err "Error: Argument -c (proxy count) must be a positive integer number";
-	usage;
+  echo_log_err "Error: Argument -c (proxy count) must be a positive integer number";
+  usage;
 fi;
 
 if [ -z $user ] && [ -z $password] && [ $use_random_auth = false ]; then auth=false; fi;
 
 if ([ -z $user ] || [ -z $password ]) && [ $auth = true ] && [ $use_random_auth = false ]; then
-	echo_log_err "Error: user and password for proxy with auth is required (specify both '--username' and '--password' startup parameters)";
-	usage;
+  echo_log_err "Error: user and password for proxy with auth is required (specify both '--username' and '--password' startup parameters)";
+  usage;
 fi;
 
 if ([[ -n $user ]] || [[ -n $password ]]) && [ $use_random_auth = true ]; then
@@ -113,7 +114,7 @@ if [ $rotating_interval -lt 0 ] || [ $rotating_interval -gt 59 ]; then
   usage;
 fi;
 
-if [ $start_port -lt 5000 ] || (($start_port - $proxy_count > 65536 )); then
+if [ $start_port -lt 3128 ] || (($start_port - $proxy_count > 65536 )); then
   echo_log_err "Wrong '--start-port' parameter value, it must be more than 5000 and '--start-port' + '--proxy-count' must be lower than 65536,
 because Linux has only 65536 potentially ports";
   usage;
@@ -197,9 +198,9 @@ function get_backconnect_ipv4(){
 function check_ipv6(){
   # Check is ipv6 enabled or not
   if test -f /proc/net/if_inet6; then
-	  echo "IPv6 interface is enabled";
+    echo "IPv6 interface is enabled";
   else
-	  echo_log_err_and_exit "Error: inet6 (ipv6) interface is not enabled. Enable IP v6 on your system.";
+    echo_log_err_and_exit "Error: inet6 (ipv6) interface is not enabled. Enable IP v6 on your system.";
   fi;
 
   if [[ $(ip -6 addr show scope global) ]]; then
@@ -366,147 +367,82 @@ function create_startup_script(){
   # Temporary variable to count generated ip's in cycle
   count=1
 
-  # Generate random 'proxy_count' ipv6 of specified subnet and write it to 'ip.list' file
-  while [ "\$count" -le $proxy_count ]
-  do
-    rnd_subnet_ip >> $random_ipv6_list_file;
-    ((count+=1))
+  # Generate random 'proxy_count' ipv6 of specified subnet and write it to file
+  while (( \$count <= $proxy_count )); do
+    rnd_ip=\$(rnd_subnet_ip)
+    echo \$rnd_ip >> $random_ipv6_list_file;
+    ip -6 addr add \$rnd_ip/$subnet dev $interface_name
+    let "count += 1";
   done;
 
-  immutable_config_part="daemon
-    nserver 1.1.1.1
-    maxconn 200
-    nscache 65536
-    timeouts 1 5 30 60 180 1800 15 60
-    setgid 65535
-    setuid 65535"
-  auth_part="auth none"
+  # Configure proxy server config
+  delete_file_if_exists $proxyserver_config_path;
 
-  if [ $auth = true ]; then
-    auth_part="auth strong
-      users $user:CL:$password
-      allow $user"
-  fi;
+  cat > $proxyserver_config_path <<-EOF
+  nserver 8.8.8.8
+  nserver 8.8.4.4
 
-  dedent immutable_config_part;
-  dedent auth_part;   
+  logfile /var/log/3proxy/3proxy.log
 
-  echo "\$immutable_config_part"\$'\n'"\$auth_part"  > $proxyserver_config_path;
-
-  # Add all ipv6 backconnect proxy with random adresses in proxy server startup config
-  port=$start_port
-  count=0
-  if [ "$proxies_type" = "http" ]; then proxy_startup_depending_on_type="proxy -6 -n -a"; else proxy_startup_depending_on_type="socks -6 -a"; fi;
-  if [ $use_random_auth = true ]; then readarray -t proxy_random_credentials < $random_users_list_file; fi;
-  for random_ipv6_address in \$(cat $random_ipv6_list_file); do
-      if [ $use_random_auth = true ]; then
-        IFS=":";
-        read -r username password <<< "\${proxy_random_credentials[\$count]}";
-        echo "flush" >> $proxyserver_config_path;
-        echo "users \$username:CL:\$password" >> $proxyserver_config_path;
-        echo "allow \$username" >> $proxyserver_config_path;
-        IFS=$' \t\n';
-      fi;
-      echo "\$proxy_startup_depending_on_type -p\$port -i$backconnect_ipv4 -e\$random_ipv6_address" >> $proxyserver_config_path;
-      ((port+=1))
-      ((count+=1))
-  done
-
-  # Script that adds all random ipv6 to default interface and runs backconnect proxy server
-  ulimit -n 600000
-  ulimit -u 600000
-  for ipv6_address in \$(cat ${random_ipv6_list_file}); do ip -6 addr add \${ipv6_address} dev ${interface_name};done;
-  ${user_home_dir}/proxyserver/3proxy/bin/3proxy ${proxyserver_config_path}
-  exit 0
+  $([[ $auth == true ]] && [[ $use_random_auth == false ]] && echo "auth strong" || echo "auth none")
+  $(cat $random_ipv6_list_file | awk '{print "proxy -6 -n -a -p" '$start_port' -i'$interface_name' "$1"'$credentials'}')
 EOF
-  
-}
 
-function open_ufw_backconnect_ports(){
-  # No need open ports if backconnect proxies on localhost
-  if [ $use_localhost = true ]; then return; fi;
+  dedent $(cat $proxyserver_config_path);
 
-  if ! is_package_installed "ufw"; then echo "Firewall not installed, ports for backconnect proxy opened successfully"; return; fi;
-
-  if ufw status | grep -qw active; then
-    ufw allow $start_port:$last_port/tcp >> $script_log_file;
-    ufw allow $start_port:$last_port/udp >> $script_log_file;
-
-    if ufw status | grep -qw $start_port:$last_port; then
-      echo "UFW ports for backconnect proxies opened successfully";
-    else
-      echo_log_err $(ufw status);
-      echo_log_err_and_exit "Cannot open ports for backconnect proxies, configure ufw please";
-    fi;
-
-  else
-    echo "UFW protection disabled, ports for backconnect proxy opened successfully";
-  fi;
-}
-
-function run_proxy_server(){
-  if [ ! -f $startup_script_path ]; then echo_log_err_and_exit "Error: proxy startup script doesn't exist."; fi;
-
-  chmod +x $startup_script_path;
-  $bash_location $startup_script_path;
-  if is_proxyserver_running; then 
-    local backconnect_ipv4=$(get_backconnect_ipv4)
-    echo -e "\nIPv6 proxy server started successfully. Backconnect IPv4 is available from $backconnect_ipv4:$start_port$credentials to $backconnect_ipv4:$last_port$credentials via $proxies_type protocol";
-    echo "You can copy all proxies (with credentials) in this file: $backconnect_proxies_file";
-  else
-    echo_log_err_and_exit "Error: cannot run proxy server";
-  fi;
-}
-
-function write_backconnect_proxies_to_file(){
-  delete_file_if_exists $backconnect_proxies_file;
-
-  local backconnect_ipv4=$(get_backconnect_ipv4);
-  local proxy_credentials=$credentials;
-  if ! touch $backconnect_proxies_file &> $script_log_file; then 
-    echo "Backconnect proxies list file path: $backconnect_proxies_file" >> $script_log_file;
-    echo_log_err "Warning: provided invalid path to backconnect proxies list file";
-    return;
+  if [[ $(cat $proxyserver_config_path) =~ ^[[:space:]]*$ ]]; then 
+    echo_log_err_and_exit "Error: something went wrong with script config file";
   fi;
 
-  if [ $use_random_auth = true ]; then 
-    local proxy_random_credentials;
-    local count=0;
-    readarray -t proxy_random_credentials < $random_users_list_file;
-  fi;
+  # Make startup script executable
+  chmod +x $proxyserver_config_path
 
-  for port in $(eval echo "{$start_port..$last_port}"); do
-    if [ $use_random_auth = true ]; then 
-      proxy_credentials=":${proxy_random_credentials[$count]}";
-      ((count+=1))
-    fi;
-    echo "$backconnect_ipv4:$port$proxy_credentials" >> $backconnect_proxies_file;
-  done;
+  # Restart proxy server with new ip's
+  3proxy_bin_path="$proxy_dir/3proxy/bin/3proxy"
+  $3proxy_bin_path $proxyserver_config_path
+EOF
 }
 
+# Main script body, invoke all needed functions
 
-delete_file_if_exists $script_log_file;
+echo_log_err "IPv6 Proxy Server with Backconnect IPv4 started with arguments: 
+  - Subnet: $subnet
+  - Proxy count: $proxy_count
+  - Username: $user
+  - Password: $password
+  - Proxies type: $proxies_type
+  - Rotating interval: $rotating_interval
+  - Subnet mask: $subnet_mask
+  - Interface name: $interface_name
+  - Start port: $start_port
+  - Random auth: $use_random_auth
+  - Localhost: $use_localhost
+  - Disable inet6 interfaces check: $inet6_network_interfaces_configuration_check
+  - Backconnect proxies file: $backconnect_proxies_file
+  - Script log file: $script_log_file
+  - Startup script path: $startup_script_path
+  - Cron script path: $cron_script_path"
 
-if is_proxyserver_installed; then
-  echo -e "Proxy server already installed, reconfiguring:\n";
-  check_ipv6;
-  generate_random_users_if_needed;
-  create_startup_script;
-  add_to_cron;
-  open_ufw_backconnect_ports;
-  run_proxy_server;
-  write_backconnect_proxies_to_file;
-else
-  check_ipv6;
-  configure_ipv6;
+if ! is_proxyserver_installed; then 
   install_requred_packages;
   install_3proxy;
-  generate_random_users_if_needed;
-  create_startup_script;
-  add_to_cron;
-  open_ufw_backconnect_ports;
-  run_proxy_server;
-  write_backconnect_proxies_to_file;
 fi;
 
-exit 0
+check_ipv6;
+generate_random_users_if_needed;
+configure_ipv6;
+create_startup_script;
+add_to_cron;
+
+if ! is_proxyserver_running; then 
+  $bash_location $startup_script_path;
+  if is_proxyserver_running; then
+    echo "Proxy server started successfully";
+  else
+    echo_log_err_and_exit "Error: cannot start proxy server";
+  fi;
+else
+  echo "Proxy server is already running";
+fi;
+
+echo -e "\nProxy server with backconnect ip's script execution successfully completed";
