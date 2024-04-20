@@ -14,7 +14,7 @@ function usage() {
                                     [--random <bool> generate random username/password for each IPv4 backconnect proxy instead of predefined (default false)] 
                                     [-t | --proxies-type <http|socks5> result proxies type (default http)]
                                     [-r | --rotating-interval <0-59> proxies extarnal address rotating time in minutes (default 0, disabled)]
-                                    [--start-port <3128-65536> start port for backconnect ipv4 (default 3128)]
+                                    [--start-port <80-65536> start port for backconnect ipv4 (default 80)]
                                     [-l | --localhost <bool> allow connections only for localhost (backconnect on 127.0.0.1)]
                                     [-m | --ipv6-mask <string> constant ipv6 address mask, to which the rotated part is added (or gateaway)
                                           use only if the gateway is different from the subnet address]
@@ -37,7 +37,7 @@ eval set -- "$options"
 # Set default values for optional arguments
 subnet=64
 proxies_type="http"
-start_port=3128
+start_port=80
 rotating_interval=0
 use_localhost=false
 auth=true
@@ -114,7 +114,7 @@ if [ $rotating_interval -lt 0 ] || [ $rotating_interval -gt 59 ]; then
   usage;
 fi;
 
-if [ $start_port -lt 3128 ] || (($start_port - $proxy_count > 65536 )); then
+if [ $start_port -lt 80 ] || (($start_port - $proxy_count > 65536 )); then
   echo_log_err "Wrong '--start-port' parameter value, it must be more than 5000 and '--start-port' + '--proxy-count' must be lower than 65536,
 because Linux has only 65536 potentially ports";
   usage;
